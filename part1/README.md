@@ -57,6 +57,90 @@ Each downloaded dataset includes the following columns:
 - `upper_shadow`: Upper wick length in pips
 - `lower_shadow`: Lower wick length in pips
 
+## Data Collection Architecture
+
+The system implements four core principles for robust data collection:
+
+### 1. Robust API Handling
+
+The system handles OANDA's 5,000 candle limit per API request through intelligent pagination. For years of historical data, this means hundreds of requests that are managed automatically:
+
+```python
+def get_historical_data(instrument, start_date, timeframe, pip_location):
+    """
+    Download historical OANDA data with automatic pagination
+    """
+    all_data = pd.DataFrame()
+    params = {
+        "from": from_time,
+        "granularity": timeframe,
+        "count": 5000  
+    }
+    
+    while more_data:
+        try:
+            r = InstrumentsCandles(instrument=instrument, params=params)
+            client.request(r)
+            
+            candles_df = get_candles_df(instrument, r.response, pip_location)
+            all_data = pd.concat([all_data, candles_df])
+            
+            # Update for next request
+            latest_time = candles_df['time'].iloc[-1]
+            params["from"] = latest_time
+            
+        except Exception as e:
+            # Implement exponential backoff
+            time.sleep(5)
+```
+
+### 2. Data Normalisation: The Game Changer
+
+Raw forex prices are meaningless for machine learning because different currency pairs have vastly different scales. EUR/USD trades around 1.1000, whilst USD/JPY trades around 150.00. 
+
+The solution is pip normalisation, which converts all prices to a consistent scale:
+
+```python
+def get_candles_df(instrument, response, pip_location):
+    """
+    Convert prices to normalised pip values
+    """
+    pip_multiplier = 10 ** pip_location
+    
+    for candle in response['candles']:
+        # Original prices
+        open_price = float(candle['mid']['o'])
+        close_price = float(candle['mid']['c'])
+        
+        # Normalised prices (in pips)
+        norm_open = open_price * pip_multiplier
+        norm_close = close_price * pip_multiplier
+```
+
+### 3. Initial Feature Engineering
+
+Raw OHLCV data is just the beginning. The system calculates essential trading features immediately:
+
+```python
+def calculate_additional_features(df, instrument_details):
+    """
+    Calculate ML-ready features
+    """
+    # Percentage returns
+    df_features['return'] = df_features['close'].pct_change() * 100
+    
+    # Pip movement and range
+    df_features['pip_range'] = df_features['norm_high'] - df_features['norm_low']
+    df_features['pip_move'] = df_features['norm_close'] - df_features['norm_open']
+    
+    # Volatility estimation
+    df_features['volatility_10'] = df_features['norm_return'].rolling(window=10).std()
+    
+    # Candlestick analysis
+    df_features['body_size'] = abs(df_features['norm_close'] - df_features['norm_open'])
+    df_features['upper_shadow'] = df_features['norm_high'] - df_features['norm_close']
+```
+
 ## Setup Instructions
 
 ### 1. Environment Setup
@@ -68,15 +152,27 @@ OANDA_API_KEY=your_api_key_here
 OANDA_ACCOUNT_ID=your_account_id_here
 ```
 
-### 2. Install Dependencies
+### 2. Install uv
 
-The project uses `uv` for dependency management. Install dependencies with:
+The project uses `uv` for dependency management. Install uv first:
+
+#### On macOS:
+```bash
+brew install astral-sh/uv/uv
+```
+
+#### On other platforms:
+Visit [uv's official installation guide](https://docs.astral.sh/uv/getting-started/installation/) for your platform.
+
+### 3. Install Dependencies
+
+Once uv is installed, install project dependencies with:
 
 ```bash
 uv sync
 ```
 
-### 3. OANDA Account Setup
+### 4. OANDA Account Setup
 
 1. Create an OANDA account at [oanda.com](https://www.oanda.com)
 2. Generate an API key from your account dashboard
@@ -181,15 +277,6 @@ The script implements intelligent rate limiting:
 - **Memory usage**: For very large datasets, consider processing in chunks.
 - **Network stability**: Ensure stable internet connection for large downloads.
 
-## Next Steps
-
-This data collection module is designed to feed into:
-
-1. **Part 2**: Technical analysis and feature engineering
-2. **Part 3**: Machine learning model development
-3. **Part 4**: Reinforcement learning trading agent
-5. **Part 5**: Backtesting and performance evaluation
-
 ## Dependencies
 
 - `pandas>=2.3.0`: Data manipulation and analysis
@@ -197,10 +284,6 @@ This data collection module is designed to feed into:
 - `oandapyv20>=0.7.2`: OANDA API client
 - `python-dotenv>=0.9.9`: Environment variable management
 - `requests>=2.32.4`: HTTP requests
-
-## License
-
-This project is part of the Forex AI Trader system. See the main project README for licensing information.
 
 ---
 
