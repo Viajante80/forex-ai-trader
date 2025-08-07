@@ -9,11 +9,28 @@ wheels/
 # OS files
 .DS_Store
 
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
 # Virtual environments
 .venv
 .env
 
 # Data files
-oanda_historical_data/*
+oanda_historical_data/
+trading_ready_data/
+
+
 
 

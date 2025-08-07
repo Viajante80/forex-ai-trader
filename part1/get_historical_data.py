@@ -35,7 +35,7 @@ timeframes = ["M5","M15", "M30", "H1", "H4", "D", "W"]
 start_date = datetime(2016, 1, 1)
 
 # Create a data directory if it doesn't exist
-data_dir = "oanda_historical_data"
+data_dir = "../oanda_historical_data"
 os.makedirs(data_dir, exist_ok=True)
 
 # Initialize the API client with credentials from .env
@@ -68,9 +68,10 @@ def get_candles_df(instrument, response, pip_location):
     Convert API response to pandas DataFrame with normalized prices
     """
     prices = []
-    # Calculate pip multiplier based on pip location
+    # Calculate pip size based on pip location
     # pipLocation is 10^x where x is the pipLocation value
-    pip_multiplier = 10 ** pip_location
+    # For EUR/USD with pipLocation = -4, pip_size = 0.0001 (1 pip)
+    pip_size = 10 ** pip_location
     
     for candle in response['candles']:
         if candle['complete']:
@@ -81,11 +82,11 @@ def get_candles_df(instrument, response, pip_location):
             close_price = float(candle['mid']['c'])
             
             # Normalized price values (convert to pips)
-            # For most major pairs like EUR/USD, 1 pip = 0.0001, so multiply by 10000
-            norm_open = open_price * pip_multiplier
-            norm_high = high_price * pip_multiplier
-            norm_low = low_price * pip_multiplier
-            norm_close = close_price * pip_multiplier
+            # price_in_pips = price / pip_size
+            norm_open = open_price / pip_size
+            norm_high = high_price / pip_size
+            norm_low = low_price / pip_size
+            norm_close = close_price / pip_size
             
             prices.append({
                 'time': candle['time'],
