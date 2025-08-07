@@ -41,6 +41,7 @@ st.markdown("""
 DATA_DIR = "../trading_ready_data"
 HISTORICAL_DATA_DIR = "../oanda_historical_data"
 
+
 def load_available_data():
     """Load available currency pairs and timeframes"""
     available_data = {}
@@ -49,13 +50,20 @@ def load_available_data():
         for pair_dir in os.listdir(DATA_DIR):
             pair_path = os.path.join(DATA_DIR, pair_dir)
             if os.path.isdir(pair_path):
-                available_data[pair_dir] = []
+                tfs = set()
+                prefix = f"{pair_dir}_"
+                suffix = "_with_indicators.pkl"
                 for file in os.listdir(pair_path):
-                    if file.endswith('_with_indicators.pkl'):
-                        timeframe = file.split('_')[2]  # Extract timeframe
-                        available_data[pair_dir].append(timeframe)
+                    if file.endswith(suffix) and file.startswith(prefix):
+                        # Extract timeframe between prefix and suffix
+                        tf = file[len(prefix):-len(suffix)]
+                        if tf:
+                            tfs.add(tf)
+                if tfs:
+                    available_data[pair_dir] = sorted(list(tfs))
     
     return available_data
+
 
 def load_data(pair, timeframe, data_type="indicators"):
     """Load data for selected pair and timeframe"""
@@ -76,8 +84,9 @@ def load_data(pair, timeframe, data_type="indicators"):
         st.error(f"Error loading data: {e}")
         return None
 
+
 def create_candlestick_chart(df, title="Price Chart"):
-    """Create candlestick chart with volume"""
+    """Create candlestick chart with volume using normalized prices (pips)."""
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
@@ -123,223 +132,165 @@ def create_candlestick_chart(df, title="Price Chart"):
         template="plotly_white"
     )
     
-    return fig
-
-def add_technical_indicators(fig, df, selected_indicators):
-    """Add selected technical indicators to the chart"""
-    
-    indicator_configs = {
-        'SMA': {
-            'columns': ['sma_10', 'sma_20', 'sma_50', 'sma_200'],
-            'colors': ['#ff9800', '#2196f3', '#4caf50', '#9c27b0'],
-            'names': ['SMA 10', 'SMA 20', 'SMA 50', 'SMA 200']
-        },
-        'EMA': {
-            'columns': ['ema_10', 'ema_20', 'ema_50'],
-            'colors': ['#ff5722', '#3f51b5', '#009688'],
-            'names': ['EMA 10', 'EMA 20', 'EMA 50']
-        },
-        'Bollinger Bands': {
-            'columns': ['bb_upper', 'bb_middle', 'bb_lower'],
-            'colors': ['#e91e63', '#607d8b', '#e91e63'],
-            'names': ['BB Upper', 'BB Middle', 'BB Lower']
-        },
-        'MACD': {
-            'columns': ['macd', 'macd_signal'],
-            'colors': ['#2196f3', '#ff9800'],
-            'names': ['MACD', 'MACD Signal']
-        }
-    }
-    
-    for indicator in selected_indicators:
-        if indicator in indicator_configs:
-            config = indicator_configs[indicator]
-            for col, color, name in zip(config['columns'], config['colors'], config['names']):
-                if col in df.columns:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=df.index,
-                            y=df[col],
-                            mode='lines',
-                            name=name,
-                            line=dict(color=color, width=2),
-                            opacity=0.8
-                        ),
-                        row=1, col=1
-                    )
+    fig.update_yaxes(title_text="Price (pips)", row=1, col=1)
     
     return fig
 
-def create_indicator_subplot(df, indicator_type):
-    """Create subplot for specific indicator types"""
-    
-    if indicator_type == 'RSI':
+
+def add_overlay_indicators(fig, df, selected, ma_periods):
+    """Add selected overlay indicators to the price chart."""
+    # SMA
+    if 'SMA' in selected:
+        for w in ma_periods:
+            col = f'sma_{w}'
+            if col in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=f'SMA {w}', line=dict(width=1.8)), row=1, col=1)
+    # EMA
+    if 'EMA' in selected:
+        for w in ma_periods:
+            col = f'ema_{w}'
+            if col in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=f'EMA {w}', line=dict(width=1.8, dash='dot')), row=1, col=1)
+    # Bollinger Bands
+    if 'Bollinger Bands' in selected:
+        for name, col, dash in [('BB Upper','bb_upper','solid'), ('BB Middle','bb_middle','dot'), ('BB Lower','bb_lower','solid')]:
+            if col in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=name, line=dict(width=1, color='#888', dash=dash)), row=1, col=1)
+    # Ichimoku Cloud
+    if 'Ichimoku Cloud' in selected:
+        for name, col, clr in [('Ichimoku A','ichimoku_a','#8e24aa'), ('Ichimoku B','ichimoku_b','#5e35b1'), ('Conversion','ichimoku_conv','#1e88e5'), ('Base','ichimoku_base','#43a047')]:
+            if col in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=name, line=dict(width=1.2, dash='dot')), row=1, col=1)
+    # Support/Resistance
+    if 'Support/Resistance' in selected:
+        for name, col, clr in [('S 20','sr_support_20','#26a69a'), ('R 20','sr_resistance_20','#ef5350'), ('S 50','sr_support_50','#2e7d32'), ('R 50','sr_resistance_50','#c62828')]:
+            if col in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df[col], mode='lines', name=name, line=dict(width=1, color=clr, dash='dash')), row=1, col=1)
+    # Fibonacci Levels
+    if 'Fibonacci' in selected:
+        for name in ['fib_0','fib_0236','fib_0382','fib_0500','fib_0618','fib_0786','fib_1']:
+            if name in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df[name], mode='lines', name=name.upper(), line=dict(width=0.8, color='#9e9e9e', dash='dot')), row=1, col=1)
+    # Pivot Points
+    if 'Pivot Points' in selected:
+        for name in ['pivot_p','pivot_r1','pivot_s1','pivot_r2','pivot_s2']:
+            if name in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df[name], mode='lines', name=name.upper(), line=dict(width=0.8, color='#795548', dash='dash')), row=1, col=1)
+    # Pattern Markers
+    if 'Patterns' in selected:
+        markers = [
+            ('bullish_engulfing', 'triangle-up', '#2e7d32'),
+            ('bearish_engulfing', 'triangle-down', '#c62828'),
+            ('hammer', 'circle', '#00695c'),
+            ('shooting_star', 'circle-open', '#ad1457')
+        ]
+        for col, sym, clr in markers:
+            if col in df.columns:
+                pts = df[df[col] == 1]
+                if not pts.empty:
+                    fig.add_trace(go.Scatter(x=pts.index, y=pts['norm_close'], mode='markers', name=col, marker=dict(symbol=sym, size=8, color=clr, line=dict(width=1))), row=1, col=1)
+
+    return fig
+
+
+def create_indicator_subplot(df, indicator_type, ma_periods):
+    """Create subplot for a specific indicator type."""
+    if indicator_type == 'RSI' and 'rsi' in df.columns:
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['rsi'],
-                mode='lines',
-                name='RSI',
-                line=dict(color='#9c27b0', width=2)
-            )
-        )
+        fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], mode='lines', name='RSI', line=dict(color='#9c27b0', width=2)))
         fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
         fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
         fig.update_layout(title="RSI", height=300, template="plotly_white")
-        
-    elif indicator_type == 'Stochastic':
+        return fig
+
+    if indicator_type == 'MACD' and {'macd','macd_signal','macd_diff'}.issubset(df.columns):
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['stoch_k'],
-                mode='lines',
-                name='%K',
-                line=dict(color='#2196f3', width=2)
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['stoch_d'],
-                mode='lines',
-                name='%D',
-                line=dict(color='#ff9800', width=2)
-            )
-        )
+        fig.add_trace(go.Bar(x=df.index, y=df['macd_diff'], name='MACD Hist', marker_color='#90caf9'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['macd'], mode='lines', name='MACD', line=dict(color='#1976d2', width=2)))
+        fig.add_trace(go.Scatter(x=df.index, y=df['macd_signal'], mode='lines', name='Signal', line=dict(color='#ff9800', width=2)))
+        fig.update_layout(title="MACD", height=300, template="plotly_white")
+        return fig
+
+    if indicator_type == 'Stochastic' and {'stoch_k','stoch_d'}.issubset(df.columns):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df['stoch_k'], mode='lines', name='%K', line=dict(color='#2196f3', width=2)))
+        fig.add_trace(go.Scatter(x=df.index, y=df['stoch_d'], mode='lines', name='%D', line=dict(color='#ff9800', width=2)))
         fig.add_hline(y=80, line_dash="dash", line_color="red")
         fig.add_hline(y=20, line_dash="dash", line_color="green")
         fig.update_layout(title="Stochastic Oscillator", height=300, template="plotly_white")
-        
-    elif indicator_type == 'ATR':
+        return fig
+
+    if indicator_type == 'ATR' and 'atr' in df.columns:
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['atr'],
-                mode='lines',
-                name='ATR',
-                line=dict(color='#4caf50', width=2)
-            )
-        )
+        fig.add_trace(go.Scatter(x=df.index, y=df['atr'], mode='lines', name='ATR', line=dict(color='#4caf50', width=2)))
         fig.update_layout(title="Average True Range", height=300, template="plotly_white")
-        
-    elif indicator_type == 'ADX':
+        return fig
+
+    if indicator_type == 'ADX' and {'adx','adx_pos','adx_neg'}.issubset(df.columns):
         fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['adx'],
-                mode='lines',
-                name='ADX',
-                line=dict(color='#607d8b', width=2)
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['adx_pos'],
-                mode='lines',
-                name='+DI',
-                line=dict(color='#4caf50', width=2)
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df.index,
-                y=df['adx_neg'],
-                mode='lines',
-                name='-DI',
-                line=dict(color='#f44336', width=2)
-            )
-        )
+        fig.add_trace(go.Scatter(x=df.index, y=df['adx'], mode='lines', name='ADX', line=dict(color='#607d8b', width=2)))
+        fig.add_trace(go.Scatter(x=df.index, y=df['adx_pos'], mode='lines', name='+DI', line=dict(color='#4caf50', width=2)))
+        fig.add_trace(go.Scatter(x=df.index, y=df['adx_neg'], mode='lines', name='-DI', line=dict(color='#f44336', width=2)))
         fig.update_layout(title="ADX", height=300, template="plotly_white")
-    
-    return fig
+        return fig
+
+    if indicator_type == 'OBV' and 'obv' in df.columns:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df['obv'], mode='lines', name='OBV', line=dict(color='#6d4c41', width=2)))
+        fig.update_layout(title="On-Balance Volume", height=300, template="plotly_white")
+        return fig
+
+    if indicator_type == 'VWAP' and 'vwap' in df.columns:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], mode='lines', name='VWAP', line=dict(color='#009688', width=2)))
+        fig.update_layout(title="VWAP", height=300, template="plotly_white")
+        return fig
+
+    return None
+
 
 def display_data_summary(df, pair, timeframe):
     """Display data summary metrics"""
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric(
-            label="Total Records",
-            value=f"{len(df):,}",
-            delta=None
-        )
-    
+        st.metric(label="Total Records", value=f"{len(df):,}")
     with col2:
         date_range = f"{df.index.min().strftime('%Y-%m-%d')} to {df.index.max().strftime('%Y-%m-%d')}"
-        st.metric(
-            label="Date Range",
-            value=date_range,
-            delta=None
-        )
-    
+        st.metric(label="Date Range", value=date_range)
     with col3:
         avg_volume = f"{df['volume'].mean():,.0f}"
-        st.metric(
-            label="Avg Volume",
-            value=avg_volume,
-            delta=None
-        )
-    
+        st.metric(label="Avg Volume", value=avg_volume)
     with col4:
         price_range = f"{df['norm_close'].max() - df['norm_close'].min():.2f}"
-        st.metric(
-            label="Price Range (pips)",
-            value=price_range,
-            delta=None
-        )
+        st.metric(label="Price Range (pips)", value=price_range)
+
 
 def main():
     """Main dashboard function"""
-    
-    # Header
     st.markdown('<h1 class="main-header">📈 Forex AI Trader - Data Visualization</h1>', unsafe_allow_html=True)
     
-    # Load available data
     available_data = load_available_data()
-    
     if not available_data:
         st.error("No data found! Please run the technical indicators script first.")
         st.info("Run: `cd part2.1 && uv run add_technical_indicators.py`")
         return
-    
+
     # Sidebar controls
     st.sidebar.header("📊 Data Selection")
-    
-    # Currency pair selection
-    pair = st.sidebar.selectbox(
-        "Select Currency Pair",
-        list(available_data.keys()),
-        index=0
-    )
-    
-    # Timeframe selection
+    pair = st.sidebar.selectbox("Select Currency Pair", list(available_data.keys()), index=0)
     timeframes = available_data[pair]
-    timeframe = st.sidebar.selectbox(
-        "Select Timeframe",
-        timeframes,
-        index=0
-    )
-    
+    timeframe = st.sidebar.selectbox("Select Timeframe", timeframes, index=0)
+
     # Date range selection
     st.sidebar.header("📅 Date Range")
-    
-    # Load data to get date range
     df = load_data(pair, timeframe)
     if df is None:
         return
-    
     min_date = df.index.min()
     max_date = df.index.max()
-    
-    # Cap the maximum selectable date at yesterday (today - 1 day)
     yesterday = (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=1)).date()
     max_selectable = min(max_date.date(), yesterday)
-    
     date_range = st.sidebar.date_input(
         "Select Date Range",
         value=(min_date.date(), max_selectable),
@@ -347,129 +298,71 @@ def main():
         max_value=max_selectable,
         key="date_range"
     )
-    
-    # Sanitize selection to ensure end date never exceeds yesterday
+    # sanitize
     if isinstance(date_range, tuple) and len(date_range) == 2:
         raw_start, raw_end = date_range
         sanitized_start = max(min_date.date(), min(raw_start, max_selectable))
         sanitized_end = min(raw_end, max_selectable)
-        
-        # If Streamlit preset chose today, clamp to yesterday and rerun to fix UI warning
         if (raw_start, raw_end) != (sanitized_start, sanitized_end):
             st.session_state["date_range"] = (sanitized_start, sanitized_end)
             st.rerun()
-        
-        # Convert to timezone-aware timestamps to match the data index
         start_date = pd.Timestamp(sanitized_start).tz_localize('UTC')
         end_date = pd.Timestamp(sanitized_end).tz_localize('UTC')
-        
-        # Filter data by date range
         df_filtered = df[(df.index >= start_date) & (df.index <= end_date)]
     else:
         df_filtered = df
-    
-    # Technical indicators selection
-    st.sidebar.header("📈 Technical Indicators")
-    
-    available_indicators = ['SMA', 'EMA', 'Bollinger Bands', 'MACD']
-    selected_overlay_indicators = st.sidebar.multiselect(
-        "Overlay Indicators (on price chart)",
-        available_indicators,
-        default=['SMA', 'EMA']
-    )
-    
-    # Separate indicator subplots
+
+    # Indicator selections
+    st.sidebar.header("📈 Overlay Indicators")
+    ma_periods = st.sidebar.multiselect("MA Periods", [50, 80, 100, 200], default=[50, 80, 100, 200])
+    overlay_options = ['SMA', 'EMA', 'Bollinger Bands', 'Ichimoku Cloud', 'Support/Resistance', 'Fibonacci', 'Pivot Points', 'Patterns']
+    selected_overlays = st.sidebar.multiselect("Choose overlays", overlay_options, default=['SMA', 'EMA'])
+
     st.sidebar.header("📊 Separate Indicator Charts")
-    available_separate_indicators = ['RSI', 'Stochastic', 'ATR', 'ADX']
-    selected_separate_indicators = st.sidebar.multiselect(
-        "Separate Indicator Charts",
-        available_separate_indicators,
-        default=['RSI']
-    )
-    
+    separate_options = ['RSI', 'MACD', 'Stochastic', 'ATR', 'ADX', 'OBV', 'VWAP']
+    selected_separate = st.sidebar.multiselect("Choose separate charts", separate_options, default=['RSI', 'MACD'])
+
     # Main content
     if not df_filtered.empty:
-        # Data summary
+        # Summary
         st.subheader(f"📊 Data Summary - {pair} {timeframe}")
         display_data_summary(df_filtered, pair, timeframe)
-        
-        # Main price chart
+
+        # Price chart + overlays
         st.subheader(f"📈 Price Chart - {pair} {timeframe}")
-        
-        # Create candlestick chart
         fig = create_candlestick_chart(df_filtered, f"{pair} {timeframe}")
-        
-        # Add selected technical indicators
-        fig = add_technical_indicators(fig, df_filtered, selected_overlay_indicators)
-        
-        # Update layout
-        fig.update_layout(
-            title=f"{pair} {timeframe} - Price Chart with Technical Indicators",
-            xaxis_title="Date",
-            yaxis_title="Price (pips)",
-            height=600
-        )
-        
+        fig = add_overlay_indicators(fig, df_filtered, selected_overlays, ma_periods)
+        fig.update_layout(title=f"{pair} {timeframe} - Price with Selected Indicators", xaxis_title="Date", yaxis_title="Price (pips)", height=650, legend=dict(orientation='h'))
         st.plotly_chart(fig, use_container_width=True)
-        
+
         # Separate indicator charts
-        if selected_separate_indicators:
-            st.subheader("📊 Technical Indicators")
-            
-            # Create columns for indicator charts
-            cols = st.columns(min(len(selected_separate_indicators), 2))
-            
-            for i, indicator in enumerate(selected_separate_indicators):
-                col_idx = i % 2
-                with cols[col_idx]:
-                    indicator_fig = create_indicator_subplot(df_filtered, indicator)
-                    st.plotly_chart(indicator_fig, use_container_width=True)
-        
+        if selected_separate:
+            st.subheader("📊 Technical Indicator Charts")
+            cols = st.columns(2)
+            for i, name in enumerate(selected_separate):
+                fig_sep = create_indicator_subplot(df_filtered, name, ma_periods)
+                if fig_sep is not None:
+                    with cols[i % 2]:
+                        st.plotly_chart(fig_sep, use_container_width=True)
+
         # Data table
         st.subheader("📋 Data Table")
-        
-        # Select columns to display
         price_cols = ['norm_open', 'norm_high', 'norm_low', 'norm_close', 'volume']
-        indicator_cols = [col for col in df_filtered.columns if col not in price_cols]
-        
-        selected_columns = st.multiselect(
-            "Select columns to display",
-            df_filtered.columns.tolist(),
-            default=price_cols
-        )
-        
+        selected_columns = st.multiselect("Select columns to display", df_filtered.columns.tolist(), default=price_cols)
         if selected_columns:
-            st.dataframe(
-                df_filtered[selected_columns].tail(100),
-                use_container_width=True
-            )
-        
-        # Download options
+            st.dataframe(df_filtered[selected_columns].tail(300), use_container_width=True)
+
+        # Downloads
         st.subheader("💾 Download Data")
-        
         col1, col2 = st.columns(2)
-        
         with col1:
-            csv_data = df_filtered.to_csv()
-            st.download_button(
-                label="Download CSV",
-                data=csv_data,
-                file_name=f"{pair}_{timeframe}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
-        
+            st.download_button(label="Download CSV", data=df_filtered.to_csv(), file_name=f"{pair}_{timeframe}.csv", mime="text/csv")
         with col2:
-            # Create a sample for download (first 1000 rows)
-            sample_data = df_filtered.head(1000).to_csv()
-            st.download_button(
-                label="Download Sample (1000 rows)",
-                data=sample_data,
-                file_name=f"{pair}_{timeframe}_sample.csv",
-                mime="text/csv"
-            )
-    
+            st.download_button(label="Download Sample (1000 rows)", data=df_filtered.head(1000).to_csv(), file_name=f"{pair}_{timeframe}_sample.csv", mime="text/csv")
+
     else:
         st.warning("No data available for the selected date range.")
+
 
 if __name__ == "__main__":
     main() 

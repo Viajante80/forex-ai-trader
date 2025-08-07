@@ -2,10 +2,10 @@ import pandas as pd
 import os
 import glob
 from ta import add_all_ta_features
-from ta.trend import SMAIndicator, EMAIndicator, MACD, ADXIndicator
+from ta.trend import SMAIndicator, EMAIndicator, MACD, ADXIndicator, IchimokuIndicator
 from ta.momentum import RSIIndicator, StochasticOscillator, WilliamsRIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
-from ta.volume import VolumeWeightedAveragePrice
+from ta.volume import VolumeWeightedAveragePrice, OnBalanceVolumeIndicator
 from ta.utils import dropna
 import warnings
 warnings.filterwarnings('ignore')
@@ -20,6 +20,87 @@ os.makedirs(output_dir, exist_ok=True)
 # Define currency pairs and timeframes (same as in the data downloader)
 currency_pairs = ["EUR_USD", "GBP_USD", "EUR_GBP"]
 timeframes = ["M5", "M15", "M30", "H1", "H4", "D", "W"]
+
+# Moving average periods requested
+MA_PERIODS = [50, 80, 100, 200]
+
+
+def _compute_pivot_points(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute classic daily pivot points on normalized prices and align to intraday rows.
+    For non-daily data, we compute previous day's pivots and forward-fill.
+    """
+    if df.index.tz is None:
+        # assume UTC if naive
+        df = df.tz_localize('UTC')
+    # Daily resample of norm prices
+    daily = df[['norm_high', 'norm_low', 'norm_close']].resample('D').agg({
+        'norm_high': 'max', 'norm_low': 'min', 'norm_close': 'last'
+    }).dropna()
+    piv = pd.DataFrame(index=daily.index)
+    H, L, C = daily['norm_high'], daily['norm_low'], daily['norm_close']
+    P = (H + L + C) / 3
+    R1 = 2*P - L
+    S1 = 2*P - H
+    R2 = P + (H - L)
+    S2 = P - (H - L)
+    piv['pivot_p'] = P.shift(1)
+    piv['pivot_r1'] = R1.shift(1)
+    piv['pivot_s1'] = S1.shift(1)
+    piv['pivot_r2'] = R2.shift(1)
+    piv['pivot_s2'] = S2.shift(1)
+    # Map back to original index by forward filling
+    piv = piv.reindex(df.index, method='ffill')
+    return piv
+
+
+def _compute_fibonacci_levels(df: pd.DataFrame, window: int = 100) -> pd.DataFrame:
+    """Compute rolling Fibonacci retracement levels based on last `window` bars.
+    Returns columns fib_0, fib_0236, fib_0382, fib_0500, fib_0618, fib_0786, fib_1.
+    """
+    highs = df['norm_high'].rolling(window)
+    lows = df['norm_low'].rolling(window)
+    H = highs.max()
+    L = lows.min()
+    rng = H - L
+    levels = pd.DataFrame(index=df.index)
+    levels['fib_0'] = L
+    levels['fib_1'] = H
+    for ratio, name in [(0.236, 'fib_0236'), (0.382, 'fib_0382'), (0.5, 'fib_0500'), (0.618, 'fib_0618'), (0.786, 'fib_0786')]:
+        levels[name] = L + rng * ratio
+    return levels
+
+
+def _compute_support_resistance(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute simple rolling support/resistance levels using min/max windows.
+    Produces sr_support_20, sr_resistance_20, sr_support_50, sr_resistance_50.
+    """
+    sr = pd.DataFrame(index=df.index)
+    for w in [20, 50]:
+        sr[f'sr_support_{w}'] = df['norm_low'].rolling(w).min()
+        sr[f'sr_resistance_{w}'] = df['norm_high'].rolling(w).max()
+    return sr
+
+
+def _compute_patterns(df: pd.DataFrame) -> pd.DataFrame:
+    """Basic candlestick pattern recognition on normalized prices.
+    Adds bullish_engulfing, bearish_engulfing, hammer, shooting_star (boolean ints).
+    """
+    p = pd.DataFrame(index=df.index)
+    o, h, l, c = df['norm_open'], df['norm_high'], df['norm_low'], df['norm_close']
+    prev_o, prev_c = o.shift(1), c.shift(1)
+    body = (c - o).abs()
+    range_ = h - l
+    upper_wick = h - c.where(c >= o, o)
+    lower_wick = o.where(c >= o, c) - l
+    # Engulfing
+    p['bullish_engulfing'] = ((prev_c < prev_o) & (c > o) & (c >= prev_o) & (o <= prev_c)).astype(int)
+    p['bearish_engulfing'] = ((prev_c > prev_o) & (c < o) & (o >= prev_c) & (c <= prev_o)).astype(int)
+    # Hammer: small body, long lower wick
+    p['hammer'] = ((body <= 0.3*range_) & (lower_wick >= 0.6*range_) & (upper_wick <= 0.2*range_)).astype(int)
+    # Shooting star: small body, long upper wick
+    p['shooting_star'] = ((body <= 0.3*range_) & (upper_wick >= 0.6*range_) & (lower_wick <= 0.2*range_)).astype(int)
+    return p
+
 
 def add_custom_indicators(df):
     """
@@ -37,17 +118,13 @@ def add_custom_indicators(df):
         return df_indicators
     
     try:
-        # Trend Indicators
-        # Simple Moving Averages
-        df_indicators['sma_10'] = SMAIndicator(close=df_indicators['norm_close'], window=10).sma_indicator()
-        df_indicators['sma_20'] = SMAIndicator(close=df_indicators['norm_close'], window=20).sma_indicator()
-        df_indicators['sma_50'] = SMAIndicator(close=df_indicators['norm_close'], window=50).sma_indicator()
-        df_indicators['sma_200'] = SMAIndicator(close=df_indicators['norm_close'], window=200).sma_indicator()
+        # Trend Indicators - Simple Moving Averages (requested periods)
+        for w in MA_PERIODS:
+            df_indicators[f'sma_{w}'] = SMAIndicator(close=df_indicators['norm_close'], window=w).sma_indicator()
         
-        # Exponential Moving Averages
-        df_indicators['ema_10'] = EMAIndicator(close=df_indicators['norm_close'], window=10).ema_indicator()
-        df_indicators['ema_20'] = EMAIndicator(close=df_indicators['norm_close'], window=20).ema_indicator()
-        df_indicators['ema_50'] = EMAIndicator(close=df_indicators['norm_close'], window=50).ema_indicator()
+        # Exponential Moving Averages (requested periods)
+        for w in MA_PERIODS:
+            df_indicators[f'ema_{w}'] = EMAIndicator(close=df_indicators['norm_close'], window=w).ema_indicator()
         
         # MACD
         macd = MACD(close=df_indicators['norm_close'])
@@ -88,26 +165,47 @@ def add_custom_indicators(df):
         # Volume Indicators
         # Volume Weighted Average Price
         df_indicators['vwap'] = VolumeWeightedAveragePrice(high=df_indicators['norm_high'], low=df_indicators['norm_low'], close=df_indicators['norm_close'], volume=df_indicators['volume']).volume_weighted_average_price()
+        # On-Balance Volume
+        df_indicators['obv'] = OnBalanceVolumeIndicator(close=df_indicators['norm_close'], volume=df_indicators['volume']).on_balance_volume()
+        
+        # Ichimoku Cloud (uses high/low only)
+        ichi = IchimokuIndicator(high=df_indicators['norm_high'], low=df_indicators['norm_low'])
+        df_indicators['ichimoku_conv'] = ichi.ichimoku_conversion_line()
+        df_indicators['ichimoku_base'] = ichi.ichimoku_base_line()
+        df_indicators['ichimoku_a'] = ichi.ichimoku_a()
+        df_indicators['ichimoku_b'] = ichi.ichimoku_b()
+        # Lagging span (close shifted 26)
+        df_indicators['ichimoku_lagging'] = df_indicators['norm_close'].shift(26)
+        
+        # Support/Resistance (rolling)
+        sr = _compute_support_resistance(df_indicators)
+        df_indicators = pd.concat([df_indicators, sr], axis=1)
+        
+        # Pivot Points (daily)
+        piv = _compute_pivot_points(df_indicators)
+        df_indicators = pd.concat([df_indicators, piv], axis=1)
+        
+        # Fibonacci levels (rolling window)
+        fib = _compute_fibonacci_levels(df_indicators, window=100)
+        df_indicators = pd.concat([df_indicators, fib], axis=1)
         
         # Custom Indicators
-        # Price position relative to moving averages
-        df_indicators['price_vs_sma_20'] = (df_indicators['norm_close'] - df_indicators['sma_20']) / df_indicators['sma_20'] * 100
-        df_indicators['price_vs_sma_50'] = (df_indicators['norm_close'] - df_indicators['sma_50']) / df_indicators['sma_50'] * 100
-        df_indicators['price_vs_ema_20'] = (df_indicators['norm_close'] - df_indicators['ema_20']) / df_indicators['ema_20'] * 100
-        
-        # Moving average crossovers
-        df_indicators['sma_10_vs_sma_20'] = (df_indicators['sma_10'] - df_indicators['sma_20']) / df_indicators['sma_20'] * 100
-        df_indicators['ema_10_vs_ema_20'] = (df_indicators['ema_10'] - df_indicators['ema_20']) / df_indicators['ema_20'] * 100
-        
-        # Bollinger Band position
-        df_indicators['bb_position'] = (df_indicators['norm_close'] - df_indicators['bb_lower']) / (df_indicators['bb_upper'] - df_indicators['bb_lower'])
-        
-        # RSI zones
-        df_indicators['rsi_oversold'] = (df_indicators['rsi'] < 30).astype(int)
-        df_indicators['rsi_overbought'] = (df_indicators['rsi'] > 70).astype(int)
+        # Price position relative to moving averages (selected periods)
+        for w in [50, 200]:
+            ma_col = f'sma_{w}'
+            if ma_col in df_indicators:
+                df_indicators[f'price_vs_sma_{w}'] = (df_indicators['norm_close'] - df_indicators[ma_col]) / df_indicators[ma_col] * 100
+        for w in [50, 200]:
+            ma_col = f'ema_{w}'
+            if ma_col in df_indicators:
+                df_indicators[f'price_vs_ema_{w}'] = (df_indicators['norm_close'] - df_indicators[ma_col]) / df_indicators[ma_col] * 100
         
         # Volatility ratio
         df_indicators['volatility_ratio'] = df_indicators['atr'] / df_indicators['norm_close'] * 100
+        
+        # Pattern recognition
+        patterns = _compute_patterns(df_indicators)
+        df_indicators = pd.concat([df_indicators, patterns], axis=1)
         
         print(f"  ✓ Added {len(df_indicators.columns) - len(df.columns)} technical indicators")
         
@@ -115,6 +213,7 @@ def add_custom_indicators(df):
         print(f"  ✗ Error adding indicators: {e}")
     
     return df_indicators
+
 
 def add_all_ta_indicators(df):
     """

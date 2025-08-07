@@ -7,6 +7,7 @@ from oandapyV20 import API
 from oandapyV20.endpoints.instruments import InstrumentsCandles
 from oandapyV20.endpoints.accounts import AccountInstruments
 from dotenv import load_dotenv
+import warnings
 
 # Load environment variables from .env file
 load_dotenv()
@@ -41,6 +42,23 @@ os.makedirs(data_dir, exist_ok=True)
 # Initialize the API client with credentials from .env
 client = oandapyV20.API(access_token=API_KEY)
 
+
+def resolve_pip_location(pair: str, instruments_dict: dict) -> int:
+    """Resolve instrument pipLocation; infer with warning if missing.
+    - JPY pairs default to -2
+    - Non-JPY pairs default to -4
+    """
+    inst = instruments_dict.get(pair)
+    if inst and "pipLocation" in inst:
+        return inst["pipLocation"]
+    is_jpy = "JPY" in pair
+    inferred = -2 if is_jpy else -4
+    warnings.warn(
+        f"pipLocation missing for {pair}. Inferred pipLocation={inferred} "
+        f"({'JPY' if is_jpy else 'non-JPY'} default). Verify in OANDA instruments to avoid scaling errors.")
+    return inferred
+
+
 def get_instrument_details():
     """
     Retrieve instrument details including pipLocation from OANDA API
@@ -62,6 +80,7 @@ def get_instrument_details():
     except Exception as e:
         print(f"Error retrieving instrument details: {e}")
         return {}
+
 
 def get_candles_df(instrument, response, pip_location):
     """
@@ -102,6 +121,7 @@ def get_candles_df(instrument, response, pip_location):
             })
     return pd.DataFrame(prices)
 
+
 def get_historical_data(instrument, start_date, timeframe, pip_location):
     """
     Download historical OANDA data from start_date to now
@@ -114,6 +134,12 @@ def get_historical_data(instrument, start_date, timeframe, pip_location):
     if isinstance(start_date, str):
         start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
     
+    # Ensure start_date is timezone-aware (UTC)
+    if start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=timezone.utc)
+    else:
+        start_date = start_date.astimezone(timezone.utc)
+    
     # Format start date for OANDA API
     from_time = start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
     
@@ -124,7 +150,8 @@ def get_historical_data(instrument, start_date, timeframe, pip_location):
     params = {
         "from": from_time,
         "granularity": timeframe,
-        "count": 5000  # Maximum allowed by OANDA
+        "count": 5000,  # Maximum allowed by OANDA
+        "price": "M"    # Explicitly request mid prices
     }
     
     # Keep track of the latest time received
@@ -133,6 +160,7 @@ def get_historical_data(instrument, start_date, timeframe, pip_location):
     # Loop until we've collected all available data
     more_data = True
     request_count = 0
+    error_count = 0
     
     while more_data:
         try:
@@ -140,11 +168,20 @@ def get_historical_data(instrument, start_date, timeframe, pip_location):
             r = InstrumentsCandles(instrument=instrument, params=params)
             client.request(r)
             
-            # Increment request counter
+            # Increment request counter and reset consecutive error counter
             request_count += 1
+            error_count = 0
             
             # Convert response candles to DataFrame with normalized values
             candles_df = get_candles_df(instrument, r.response, pip_location)
+            
+            # One-time sanity check for normalization scale
+            if request_count == 1 and not candles_df.empty:
+                mean_norm = candles_df['norm_close'].mean()
+                if mean_norm < 100 or mean_norm > 1_000_000:
+                    warnings.warn(
+                        f"{instrument} normalization mean looks unusual ({mean_norm:.2f} pips). "
+                        "Verify pipLocation/displayPrecision.")
             
             # If we got data back
             if not candles_df.empty:
@@ -155,7 +192,9 @@ def get_historical_data(instrument, start_date, timeframe, pip_location):
                 latest_time = candles_df['time'].iloc[-1]
                 
                 # Update params for next request with the new "from" time
-                params["from"] = latest_time
+                # Bump by +1 second to avoid including the last candle again
+                next_from = (pd.to_datetime(latest_time, utc=True) + pd.Timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                params["from"] = next_from
                 
                 print(f"  Downloaded batch {request_count}: {len(candles_df)} candles ending at {latest_time}")
                 
@@ -176,8 +215,9 @@ def get_historical_data(instrument, start_date, timeframe, pip_location):
             print("  Pausing and trying again...")
             time.sleep(5)  # Longer pause on error
             
-            # If we've had too many errors, give up
-            if request_count > 3:
+            # Track consecutive errors and give up after too many
+            error_count += 1
+            if error_count > 3:
                 more_data = False
     
     # Clean up the DataFrame
@@ -195,6 +235,7 @@ def get_historical_data(instrument, start_date, timeframe, pip_location):
         all_data.sort_index(inplace=True)
     
     return all_data
+
 
 def calculate_additional_features(df, instrument_details):
     """
@@ -252,11 +293,9 @@ for pair in major_pairs:
     pair_dir = os.path.join(data_dir, pair)
     os.makedirs(pair_dir, exist_ok=True)
     
-    # Get pip location for this instrument
-    # pipLocation is typically -4 for most major pairs (like EUR/USD),
-    # meaning 1 pip = 0.0001, so we need to multiply by 10^4 to normalize
+    # Get pip location for this instrument (with dynamic fallback)
     instrument_details = instruments_dict.get(pair, {})
-    pip_location = instrument_details.get('pipLocation', -4)
+    pip_location = resolve_pip_location(pair, instruments_dict)
     
     print(f"\nProcessing {pair} with pipLocation: {pip_location}")
     print(f"1 pip = {10**pip_location}")

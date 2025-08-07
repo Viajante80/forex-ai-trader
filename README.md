@@ -33,6 +33,11 @@ forex-ai-trader/
 │   ├── get_historical_data.py
 │   ├── README.md
 │   └── pyproject.toml
+├── part2.1/                  # Technical Indicators & Dashboard (Streamlit)
+│   ├── add_technical_indicators.py
+│   ├── dashboard.py
+│   ├── README.md
+│   └── pyproject.toml
 ├── part2/                    # Feature Engineering (Coming Soon)
 ├── part3/                    # Machine Learning Models (Coming Soon)
 ├── part4/                    # Reinforcement Learning Agent (Coming Soon)
@@ -102,16 +107,9 @@ The foundation of any successful trading algorithm is quality data. Part 1 focus
 ### Key Features
 
 - **Multi-timeframe support**: M5, M15, M30, H1, H4, D, W
-- **Advanced data normalization**: Pip-based scaling for consistent ML features
+- **Advanced data normalization**: Prices normalized to pips (uses dynamic `pipLocation`; JPY handled automatically)
 - **Production-ready**: Error handling, rate limiting, and comprehensive logging
 - **Feature engineering**: Volatility, returns, and candlestick analysis
-
-### What You'll Learn
-
-1. **Robust API Handling**: Automatic pagination and error recovery
-2. **Data Normalization**: Converting prices to pip values for ML compatibility
-3. **Feature Engineering**: Calculating trading-relevant features
-4. **Production Structure**: Environment variables, organized storage, and logging
 
 ### Running Part 1
 
@@ -120,11 +118,10 @@ cd part1
 uv run get_historical_data.py
 ```
 
-The system will automatically:
-- Download years of historical data for configured currency pairs
-- Normalize all prices to pip values
-- Calculate ML-ready features (returns, volatility, candlestick patterns)
-- Save data in organized pickle files with CSV samples for inspection
+Outputs:
+- Downloaded historical data per pair/timeframe
+- Prices normalized to pips for cross-pair comparability
+- Saved as pickle with sample CSVs
 
 📖 **[Read the detailed Part 1 documentation →](part1/README.md)**
 
@@ -140,6 +137,27 @@ The system is built on several core principles that ensure reliability and scala
 4. **Start Simple**: Master data collection before moving to complex strategies
 
 
+
+## 📈 Part 2.1: Technical Indicators & Dashboard
+
+Turn normalized historical data into ML‑ready features and visualize them interactively.
+
+### Key Features
+- Indicators: SMA/EMA (50/80/100/200), MACD, RSI, Stochastic, Bollinger Bands, ATR, ADX, Ichimoku
+- Levels: Support/Resistance, Pivot Points, Fibonacci retracements
+- Volume: VWAP, OBV
+- Patterns: Engulfing, Hammer, Shooting Star
+- Streamlit Dashboard: Candlestick (pips) with selectable overlays and separate indicator charts, date range capped at yesterday
+
+### Run
+```bash
+cd part2.1
+uv sync
+uv run add_technical_indicators.py
+uv run streamlit run dashboard.py
+```
+
+📖 **[Read the detailed Part 2.1 documentation →](part2.1/README.md)**
 
 ## 🚧 Coming Soon
 
