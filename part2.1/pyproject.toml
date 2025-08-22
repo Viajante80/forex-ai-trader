@@ -1,7 +1,7 @@
 # For Mac users, install uv with Homebrew: brew install astral-sh/uv/uv
 # For other platforms, see https://github.com/astral-sh/uv#installation
 [project]
-name = "forex-ai-trader-part2.1"
+name = "forex-ai-trader-part2-1"
 version = "0.1.0"
 description = "Forex AI trader"
 readme = "README.md"

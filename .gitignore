@@ -30,7 +30,51 @@ logs/
 # Data files
 oanda_historical_data/
 trading_ready_data/
+backtest_strategies/EUR_USD
 
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
 
+# OS files
+.DS_Store
 
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Virtual environments
+.venv
+.env
+
+# Data files
+oanda_historical_data/
+trading_ready_data/
+backtest_strategies/
+
+*.zip
+*.pkl
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*/tensorboard_logs/*
+*.txt
+*.pth
 

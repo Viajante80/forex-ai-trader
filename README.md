@@ -38,10 +38,12 @@ forex-ai-trader/
 │   ├── dashboard.py
 │   ├── README.md
 │   └── pyproject.toml
-├── part2/                    # Feature Engineering (Coming Soon)
-├── part3/                    # Machine Learning Models (Coming Soon)
-├── part4/                    # Reinforcement Learning Agent (Coming Soon)
-├── part5/                    # Backtesting & Performance (Coming Soon)
+├── part2.2/                  # Strategy Backtesting Engine
+│   ├── backtest_engine.py
+│   ├── dashboard.py
+│   ├── README.md
+│   └── pyproject.toml
+├── part2.3/                  # Trading Simulator (Coming Soon)
 └── README.md                 # This file
 ```
 
@@ -159,19 +161,100 @@ uv run streamlit run dashboard.py
 
 📖 **[Read the detailed Part 2.1 documentation →](part2.1/README.md)**
 
+## 🧪 Part 2.2: Strategy Backtesting
+
+A comprehensive backtesting engine that evaluates individual indicators and combinations (2 and 3) under a consistent rule-based execution model. This module provides fast, reproducible backtesting workflows over the normalized (pips) datasets produced in Part 1 and enriched in Part 2.1.
+
+### Key Features
+
+- **Multi-timeframe testing**: M5, M15, M30, H1, H4, D, W
+- **Comprehensive indicator coverage**: RSI, MACD, Stochastic, Bollinger Bands, ADX, Ichimoku, MAs, VWAP, OBV
+- **Consistent execution rules**: Standardized entry/exit logic across all strategies
+- **Results dashboard**: Interactive Streamlit interface for strategy analysis
+- **Performance metrics**: Win rate, total pips, profit factor, average pips per trade
+
+### Entry and Risk Rules (in pips)
+
+#### Long Trades
+- **Entry**: When combined signals are bullish AND price trades above previous candle high + 1 pip
+- **Stop Loss**: Previous candle low
+- **Take Profit**: 2:1 reward-to-risk ratio → TP = entry + 2 × (entry − SL)
+
+#### Short Trades  
+- **Entry**: When combined signals are bearish AND price trades below previous candle low − 1 pip
+- **Stop Loss**: Previous candle high
+- **Take Profit**: 2:1 reward-to-risk ratio → TP = entry − 2 × (SL − entry)
+
+#### Explicit Formulas
+- `entry_long = prev_high + 1 pip`
+- `sl_long = prev_low`
+- `tp_long = entry_long + 2 × (entry_long − sl_long)`
+- `entry_short = prev_low − 1 pip`
+- `sl_short = prev_high`
+- `tp_short = entry_short − 2 × (sl_short − entry_short)`
+
+#### Example (pips)
+If `prev_high = 11234` and `prev_low = 11210`:
+- **Long**: `entry = 11235`, `SL = 11210`, `risk = 25` → `TP = 11235 + 2×25 = 11285`
+- **Short**: `entry = 11209`, `SL = 11234`, `risk = 25` → `TP = 11209 − 2×25 = 11159`
+
+### What It Tests
+
+#### Single Indicator Strategies
+Tests individual indicators from this comprehensive set:
+`rsi, macd, macd_signal, stoch_k, stoch_d, bb_percent, bb_width, atr, adx, adx_pos, adx_neg, ichimoku_a, ichimoku_b, obv, vwap, sma_50, sma_80, sma_100, sma_200, ema_50, ema_80, ema_100, ema_200`
+
+#### Multi-Indicator Combinations
+- **2-indicator combinations**: Tests strategic pairs of indicators
+- **3-indicator combinations**: Tests triple indicator strategies
+
+#### Signal Logic Summary
+- **RSI**: Long if <30; Short if >70
+- **MACD**: Long if `macd > macd_signal`; Short otherwise
+- **Stochastic**: Long if `%K<20 & %K>%D`; Short if `%K>80 & %K<%D`
+- **Bollinger Bands**: Long if `%B<0.1`; Short if `%B>0.9`
+- **ADX/DI**: Long if `+DI>-DI & ADX>20`; Short if `-DI>+DI & ADX>20`
+- **Ichimoku**: Long if close above both Span A & B; Short if below both
+- **MAs/VWAP**: Long if close > MA/VWAP; Short if close < MA/VWAP
+- **OBV**: Slope up → Long; Slope down → Short
+- **Combined signal**: Average of votes (>0 bullish, <0 bearish, 0 neutral)
+
+### Run Backtests
+
+```bash
+cd part2.2
+uv sync
+uv run backtest_engine.py
+```
+
+### Results Dashboard
+
+```bash
+uv run streamlit run dashboard.py
+```
+
+### Outputs
+
+Results are saved to `../backtest_strategies/`:
+- `results_single.pkl` – Single-indicator summary
+- `results_combo2.pkl` – 2-indicator combo summary  
+- `results_combo3.pkl` – 3-indicator combo summary
+- Per-pair trade logs: `{PAIR}/{PAIR}_{TF}_{combo}_trades.pkl`
+
+### Dashboard Features
+
+- Loads `.pkl` result files
+- Filter by timeframe and minimum trade count
+- Sort by win rate, total pips, profit factor, or average pips
+- View top strategy rows and bar charts
+- Summary metrics aggregation
+
+📖 **[Read the detailed Part 2.2 documentation →](part2.2/README.md)**
+
 ## 🚧 Coming Soon
 
-### Part 2: Feature Engineering
-Advanced technical indicators, market regime detection, and statistical methods that transform raw price data into trading signals.
-
-### Part 3: Machine Learning Models
-Building and training ML models for price prediction and pattern recognition.
-
-### Part 4: Reinforcement Learning Agent
-Developing an RL agent that learns optimal trading strategies through experience.
-
-### Part 5: Backtesting & Performance
-Comprehensive backtesting framework and performance evaluation metrics.
+### Part 2.3: Trading Simulator
+Interactive trading simulator for strategy testing and validation.
 
 ## 📈 Supported Currency Pairs
 
